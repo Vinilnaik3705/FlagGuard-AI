@@ -96,8 +96,9 @@ def build_executor_router(authorize, db):
                     status,detail = "verified","Environment default verified; identity and segment overrides not verified"
                 else:
                     status,detail = "unknown","Provider state differs from target"
-        except providers.ProviderError:
-            status,detail = "unknown","Provider error; inspect actual state before creating another plan"
+        except providers.ProviderError as exc:
+            status = "unknown"
+            detail = f"Provider error: {exc}"
         finally:
             with closing(connection()) as conn, conn:
                 conn.execute("UPDATE changes SET status=?,detail=? WHERE id=?",(status,detail,change_id))
