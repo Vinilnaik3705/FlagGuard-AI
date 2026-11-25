@@ -1,15 +1,9 @@
 # FlagGuard AI
 
-A reusable, human-approved feature release and incident investigation agent for Flagsmith. OpenTelemetry Astronomy Shop is an external integration target, not a dependency of the core.
+Standalone feature release and incident investigation agent. Initial read-only telemetry analyzer; live Flagsmith, LLM, OpenTelemetry integration and dashboard are pending.
 
-## Status
-Initial implementation; live provider and Astronomy Shop validation pending.
+## Run
 
-## Design
-Applications send feature-attributed telemetry via a versioned HTTP API. The agent compares cohorts, gathers evidence, proposes actions, and never writes flags directly. A separate executor validates approvals and restores verified snapshots.
+Python 3.12: create a virtual environment, install `pip install -r requirements.txt`, set `FLAGGUARD_API_KEY` to a random secret in your shell, then run `uvicorn flagguard.main:app`. API documentation: `/docs`. Run tests with `python -m pytest -q`.
 
-## Upstream
-[OpenTelemetry Demo](https://github.com/open-telemetry/opentelemetry-demo) (Apache-2.0). Upstream code is not modified by this repository.
-
-## Local development
-Python 3.12 recommended. Use a virtual environment. See docs/architecture.md for integration requirements.
+See [architecture](docs/architecture.md). External test target: [OpenTelemetry Astronomy Shop](https://github.com/open-telemetry/opentelemetry-demo).
