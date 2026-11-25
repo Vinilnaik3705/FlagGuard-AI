@@ -41,3 +41,5 @@ def analysis(service: str, environment: str, flag: str):
     return {"groups":groups,"recommendation":assess(groups),"window_seconds":300,"executed":False}
 from .agent import build_router
 app.include_router(build_router(authorize, db, analysis))
+from .executor import build_executor_router
+app.include_router(build_executor_router(authorize, db))
