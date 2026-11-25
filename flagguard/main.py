@@ -39,3 +39,5 @@ def analysis(service: str, environment: str, flag: str):
         rows=conn.execute("SELECT payload FROM events WHERE service=? AND environment=? AND received >= unixepoch()-300 ORDER BY id DESC LIMIT 10000",(service,environment)).fetchall()
     groups=summarize([json.loads(r[0]) for r in rows],flag)
     return {"groups":groups,"recommendation":assess(groups),"window_seconds":300,"executed":False}
+from .agent import build_router
+app.include_router(build_router(authorize, db, analysis))
