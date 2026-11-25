@@ -16,7 +16,7 @@ def run_cli(feature, action="get"):
         raise providers.ProviderError("Flagsmith CLI not found")
     env = {k:v for k,v in os.environ.items() if not k.startswith("FLAGSMITH_")}
     env["FLAGSMITH_API_KEY"] = providers.required("FLAGSMITH_ADMIN_API_KEY")
-    args = ["flag","get",feature] if action=="get" else ["flag","update",feature,"--"+action]
+    args = ["flag","get",feature] if action=="get" else ["flag","update",feature,"--"+action,"--yes"]
     args += ["--environment",providers.required("FLAGSMITH_ENVIRONMENT_ID"),"--project",providers.required("FLAGSMITH_PROJECT_ID"),"--api-url","https://api.flagsmith.com","--no-input","--json"]
     try:
         p = subprocess.run([executable,*args],env=env,capture_output=True,text=True,timeout=45,check=False)
@@ -24,6 +24,9 @@ def run_cli(feature, action="get"):
         raise providers.ProviderError("CLI launch failed or timed out") from None
     if p.returncode:
         raise providers.ProviderError(f"CLI exited with code {p.returncode}")
+    if action != "get":
+        print("CLI update response:", p.stdout)
+        print("CLI update stderr:", p.stderr)
     if action=="get":
         try:
             data=json.loads(p.stdout)

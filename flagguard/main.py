@@ -43,3 +43,5 @@ from .agent import build_router
 app.include_router(build_router(authorize, db, analysis))
 from .executor import build_executor_router
 app.include_router(build_executor_router(authorize, db))
+from .cli_executor import build_cli_router
+app.include_router(build_cli_router(authorize, db))
