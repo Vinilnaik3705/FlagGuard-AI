@@ -1,7 +1,7 @@
 import os, secrets, sqlite3, json
 from contextlib import closing
 from fastapi import FastAPI, Header, HTTPException, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, StrictInt, ConfigDict, field_validator
 from .core import summarize, assess
 
 app = FastAPI(title="FlagGuard AI", version="0.1.0")
@@ -30,11 +30,19 @@ def db():
     return conn
 
 class Event(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     service: str = Field(min_length=1,max_length=100)
     environment: str = Field(min_length=1,max_length=100)
-    status_code: int = Field(ge=100,le=599)
-    latency_ms: float = Field(ge=0)
-    flags: dict[str,bool]
+    status_code: StrictInt = Field(ge=100,le=599)
+    latency_ms: float = Field(ge=0,le=86400000,strict=True)
+    flags: dict[str,StrictBool] = Field(min_length=1,max_length=100)
+
+    @field_validator('flags')
+    @classmethod
+    def valid_flag_names(cls, flags):
+        if any(not name.strip() or len(name)>100 for name in flags):
+            raise ValueError('Invalid flag name')
+        return flags
 
 @app.get("/api/health")
 def health():
@@ -95,3 +103,6 @@ from fastapi.responses import FileResponse
 @app.get("/", include_in_schema=False)
 def dashboard():
     return FileResponse(Path(__file__).with_name("dashboard.html"), media_type="text/html", headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY"})
+
+from .limits import RequestLimits
+app.add_middleware(RequestLimits)
