@@ -59,7 +59,15 @@ def build_otlp_router(authorize,db,Event):
                                 if grpc is not None: status=200 if int(grpc)==0 else 500
                                 elif span.get("status",{}).get("code") in (2,"STATUS_CODE_ERROR"): status=500
                                 else: raise ValueError()
-                            event=Event(service=ra["service.name"],environment=ra.get("deployment.environment.name",ra.get("deployment.environment")),flags=flags,status_code=int(status),latency_ms=(end-start)*1000)
+                            segments={}
+                            for k,v in a.items():
+                                if k.startswith("flagguard.segment."):
+                                    if type(v) is str and v.isascii() and v.isdigit() and len(v)<=16:
+                                        v=int(v)
+                                    if type(v) is not int or not 0<v<=9007199254740991:
+                                        raise ValueError("Invalid segment ID")
+                                    segments[k[len("flagguard.segment."):]]=v
+                            event=Event(service=ra["service.name"],environment=ra.get("deployment.environment.name",ra.get("deployment.environment")),flags=flags,segments=segments,status_code=int(status),latency_ms=(end-start)*1000)
                             if not allowed(event): raise ValueError("Telemetry scope not authorized")
                             trace, sid=span["traceId"],span["spanId"]
                             if not isinstance(trace,str) or not isinstance(sid,str) or len(trace)!=32 or len(sid)!=16 or not int(trace,16) or not int(sid,16): raise ValueError()
