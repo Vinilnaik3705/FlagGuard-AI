@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from .cli_executor import prepare_change, Plan
 from .segment_evidence import target
 from .incident_report import build_report
@@ -23,15 +24,18 @@ def approval_connection(db):
     return conn
 
 def investigate_once(db, analysis, query):
+    started=time.perf_counter()
     evidence = analysis(query.service, query.environment, query.flag)
     evidence.update(query.model_dump())
     # Send only aggregate evidence to the external model, not raw logs or credentials.
+    ai_started=time.perf_counter()
     try:
         explanation = providers.explain({"groups": evidence["groups"], "recommendation": evidence["recommendation"]})
         source = "groq"
     except providers.ProviderError:
         explanation = "AI unavailable. Review the deterministic recommendation and sampled evidence."
         source = "rule_based"
+    ai_seconds=time.perf_counter()-ai_started
     recovery_plan = None
     recovery_error = None
     approval_id = None
@@ -50,7 +54,8 @@ def investigate_once(db, analysis, query):
         with closing(approval_connection(db)) as conn, conn:
             conn.execute("INSERT INTO approvals(id,evidence,status) VALUES(?,?,?)", (approval_id, json.dumps(evidence), "pending"))
     report=build_report(evidence, explanation, source, recovery_plan, recovery_error)
-    return {**evidence, "report":report, "explanation": explanation, "explanation_source": source, "approval_id": approval_id, "recovery_plan": recovery_plan, "recovery_error": recovery_error}
+    timing={"ai_call_seconds":round(ai_seconds,6),"investigation_seconds":round(time.perf_counter()-started,6),"completed_at":time.time()}
+    return {**evidence, "timing":timing, "report":report, "explanation": explanation, "explanation_source": source, "approval_id": approval_id, "recovery_plan": recovery_plan, "recovery_error": recovery_error}
 
 
 
