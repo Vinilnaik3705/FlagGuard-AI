@@ -29,11 +29,11 @@ async function flag(identity) {
 }
 let pending = 0;
 function report(enabled, status, start) {
-  if (pending >= 32 || !process.env.FLAGGUARD_URL || !process.env.FLAGGUARD_API_KEY) return;
+  if (pending >= 32 || !process.env.FLAGGUARD_URL || !(process.env.FLAGGUARD_TELEMETRY_KEY || process.env.FLAGGUARD_API_KEY)) return;
   pending++;
   fetch(process.env.FLAGGUARD_URL.replace(/\/$/, '') + '/api/v1/telemetry', {
     method: 'POST',
-    headers: {'Authorization': 'Bearer ' + process.env.FLAGGUARD_API_KEY, 'Content-Type': 'application/json'},
+    headers: {'Authorization': 'Bearer ' + (process.env.FLAGGUARD_TELEMETRY_KEY || process.env.FLAGGUARD_API_KEY), 'Content-Type': 'application/json'},
     body: JSON.stringify({service:'astronomy-payment',environment:'development',flags:{[FLAG]:enabled},status_code:status,latency_ms:performance.now()-start}),
     signal: AbortSignal.timeout(2000)
   }).catch(()=>{}).finally(()=>pending--);
