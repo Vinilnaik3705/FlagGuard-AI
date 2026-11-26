@@ -154,3 +154,9 @@ def dashboard():
 
 from .limits import RequestLimits
 app.add_middleware(RequestLimits)
+
+# Separate identity and tenant directory; legacy routes retain API-key authorization.
+from .identity import router as identity_router
+from .tenant_directory import router as tenant_router
+app.include_router(identity_router)
+app.include_router(tenant_router)
