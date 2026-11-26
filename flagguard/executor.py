@@ -6,6 +6,7 @@ from contextlib import closing
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, StrictBool, Field
+from .audit import record
 from . import providers
 
 class Plan(BaseModel):
@@ -57,6 +58,7 @@ def build_executor_router(authorize, db):
         change_id = str(uuid4())
         with closing(connection()) as conn, conn:
             conn.execute("INSERT INTO changes(id,env,state_id,before,target,status) VALUES(?,?,?,?,?,?)",(change_id,env,body.state_id,json.dumps(before,sort_keys=True),int(body.enabled),"pending"))
+            record(conn, "legacy_change", change_id, "plan", "pending")
         return {"id":change_id,"environment":env,"state_id":body.state_id,"before_enabled":before["enabled"],"target_enabled":body.enabled,"status":"pending","scope":"environment_default_only"}
     @router.post("/{change_id}/approval")
     def approve(change_id: str, body: Approval):
@@ -65,6 +67,7 @@ def build_executor_router(authorize, db):
             result = conn.execute("UPDATE changes SET status=? WHERE id=? AND status='pending' AND created >= unixepoch()-600",(status,change_id))
             if result.rowcount != 1:
                 raise HTTPException(409,"Missing, expired or decided change")
+            record(conn, "legacy_change", change_id, "decision", status)
         return {"id":change_id,"status":status}
     @router.get("/{change_id}")
     def get(change_id: str):
@@ -85,6 +88,7 @@ def build_executor_router(authorize, db):
             result = conn.execute("UPDATE changes SET status='executing' WHERE id=? AND status='approved' AND created >= unixepoch()-600",(change_id,))
             if result.rowcount != 1:
                 raise HTTPException(409,"Change not approved, expired or already used")
+            record(conn, "legacy_change", change_id, "execute", "executing")
         status,detail = "unknown","Execution interrupted; inspect provider before retrying"
         try:
             if snapshot(env,state_id) != json.loads(before):
@@ -102,5 +106,6 @@ def build_executor_router(authorize, db):
         finally:
             with closing(connection()) as conn, conn:
                 conn.execute("UPDATE changes SET status=?,detail=? WHERE id=?",(status,detail,change_id))
+                record(conn, "legacy_change", change_id, "result", status)
         return {"id":change_id,"status":status,"executed":status=="verified","detail":detail}
     return router
