@@ -4,6 +4,8 @@ from fastapi import FastAPI, Header, HTTPException, Depends
 from pydantic import BaseModel, Field, StrictBool, StrictInt, ConfigDict, field_validator
 from .core import summarize, assess, policy
 from .telemetry_scope import allowed
+from .segment_evidence import segment_evidence
+from pydantic import model_validator
 
 app = FastAPI(title="FlagGuard AI", version="0.1.0")
 
@@ -48,6 +50,14 @@ class Event(BaseModel):
     latency_ms: float = Field(ge=0,le=86400000,strict=True)
     flags: dict[str,StrictBool] = Field(min_length=1,max_length=100)
 
+    segments: dict[str, StrictInt] = Field(default_factory=dict,max_length=100)
+
+    @model_validator(mode='after')
+    def validate_segments(self):
+        if any(k not in self.flags or v<=0 for k,v in self.segments.items()):
+            raise ValueError('Invalid segment metadata')
+        return self
+
     @field_validator('flags')
     @classmethod
     def valid_flag_names(cls, flags):
@@ -76,8 +86,9 @@ def analysis(service: str, environment: str, flag: str):
     window=rules.pop("window_seconds")
     with closing(db()) as conn:
         rows=conn.execute("SELECT payload FROM events WHERE service=? AND environment=? AND received >= unixepoch()-? ORDER BY id DESC LIMIT 10000",(service,environment,window)).fetchall()
-    groups=summarize([json.loads(r[0]) for r in rows],flag)
-    return {"groups":groups,"recommendation":assess(groups,**rules),"window_seconds":window,"policy":rules,"executed":False}
+    events=[json.loads(r[0]) for r in rows]
+    groups=summarize(events,flag)
+    return {"groups":groups,"recommendation":assess(groups,**rules),"window_seconds":window,"policy":rules,"segment_evidence":segment_evidence(events,flag,rules),"executed":False}
 from .agent import build_router
 app.include_router(build_router(authorize, db, analysis))
 from .executor import build_executor_router
