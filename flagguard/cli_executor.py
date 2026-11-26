@@ -21,12 +21,33 @@ def scope(feature):
         raise HTTPException(403,"Feature not allowlisted")
     return {"environment":providers.required("FLAGSMITH_ENVIRONMENT_ID"),"project":providers.required("FLAGSMITH_PROJECT_ID")}
 
+def change_connection(db):
+    conn=db()
+    conn.execute("CREATE TABLE IF NOT EXISTS cli_changes (id TEXT PRIMARY KEY, feature TEXT NOT NULL, scope TEXT NOT NULL, before TEXT NOT NULL, target INTEGER NOT NULL, status TEXT NOT NULL, created INTEGER DEFAULT (unixepoch()), detail TEXT)")
+    return conn
+
+def prepare_change(db, body: Plan):
+    try:
+        target_scope=scope(body.feature)
+        before=cli_provider.snapshot(body.feature)
+    except providers.ProviderError as exc:
+        raise HTTPException(502,str(exc)) from None
+    if before["enabled"]==body.enabled:
+        raise HTTPException(409,"Already in desired state")
+    with closing(change_connection(db)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row=conn.execute("SELECT id,status FROM cli_changes WHERE feature=? AND scope=? AND before=? AND target=? AND status IN ('pending','approved') AND created>=unixepoch()-600 ORDER BY created DESC LIMIT 1",(body.feature,json.dumps(target_scope),json.dumps(before),int(body.enabled))).fetchone()
+        if row:
+            id,status=row
+        else:
+            id,status=str(uuid4()),"pending"
+            conn.execute("INSERT INTO cli_changes(id,feature,scope,before,target,status) VALUES(?,?,?,?,?,?)",(id,body.feature,json.dumps(target_scope),json.dumps(before),int(body.enabled),status))
+    return {"id":id,"feature":body.feature,**target_scope,"before_enabled":before["enabled"],"target_enabled":body.enabled,"status":status}
+
 def build_cli_router(authorize, db):
     router=APIRouter(prefix="/api/v1/cli-changes",dependencies=[Depends(authorize)])
     def connection():
-        conn=db()
-        conn.execute("CREATE TABLE IF NOT EXISTS cli_changes (id TEXT PRIMARY KEY, feature TEXT NOT NULL, scope TEXT NOT NULL, before TEXT NOT NULL, target INTEGER NOT NULL, status TEXT NOT NULL, created INTEGER DEFAULT (unixepoch()), detail TEXT)")
-        return conn
+        return change_connection(db)
     def read(conn,id):
         row=conn.execute("SELECT feature,scope,before,target,status,detail FROM cli_changes WHERE id=?",(id,)).fetchone()
         if row is None:
@@ -34,17 +55,7 @@ def build_cli_router(authorize, db):
         return row
     @router.post("")
     def plan(body: Plan):
-        try:
-            target_scope=scope(body.feature)
-            before=cli_provider.snapshot(body.feature)
-        except providers.ProviderError as exc:
-            raise HTTPException(502,str(exc)) from None
-        if before["enabled"]==body.enabled:
-            raise HTTPException(409,"Already in desired state")
-        id=str(uuid4())
-        with closing(connection()) as conn, conn:
-            conn.execute("INSERT INTO cli_changes(id,feature,scope,before,target,status) VALUES(?,?,?,?,?,?)",(id,body.feature,json.dumps(target_scope),json.dumps(before),int(body.enabled),"pending"))
-        return {"id":id,"feature":body.feature,**target_scope,"before_enabled":before["enabled"],"target_enabled":body.enabled,"status":"pending"}
+        return prepare_change(db, body)
     @router.post("/{id}/approval")
     def approve(id: str, body: Decision):
         status="approved" if body.approve else "rejected"
