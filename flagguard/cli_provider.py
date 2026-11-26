@@ -34,7 +34,7 @@ def run_cli(feature, action="get", segment=None):
         except ValueError:
             raise providers.ProviderError("Invalid CLI JSON") from None
         if segment is not None:
-            if not isinstance(data,dict) or type(data.get("enabled")) is not bool:
+            if not isinstance(data,dict) or data.get("feature") != feature or data.get("type") != "standard" or type(data.get("enabled")) is not bool or not isinstance(data.get("segment"),dict) or data["segment"].get("id") != segment:
                 raise providers.ProviderError("Unexpected segment response")
             return data
         if not isinstance(data,dict) or data.get("feature")!=feature or type(data.get("enabled")) is not bool:
