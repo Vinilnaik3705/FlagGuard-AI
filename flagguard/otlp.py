@@ -1,6 +1,7 @@
 """OTLP/HTTP JSON receiver for explicitly tagged request spans."""
 import json
 import time
+from .telemetry_scope import allowed
 from contextlib import closing
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
@@ -42,6 +43,7 @@ def build_otlp_router(authorize,db,Event):
                                 elif span.get("status",{}).get("code") in (2,"STATUS_CODE_ERROR"): status=500
                                 else: raise ValueError()
                             event=Event(service=ra["service.name"],environment=ra.get("deployment.environment.name",ra.get("deployment.environment")),flags=flags,status_code=int(status),latency_ms=(end-start)*1000)
+                            if not allowed(event): raise ValueError("Telemetry scope not authorized")
                             trace, sid=span["traceId"],span["spanId"]
                             if not isinstance(trace,str) or not isinstance(sid,str) or len(trace)!=32 or len(sid)!=16 or not int(trace,16) or not int(sid,16): raise ValueError()
                         except (ValueError,TypeError,KeyError,AttributeError):
@@ -49,7 +51,7 @@ def build_otlp_router(authorize,db,Event):
                             continue
                         if conn.execute("INSERT OR IGNORE INTO otlp_seen VALUES(?,?,?)",(trace.lower(),sid.lower(),now)).rowcount:
                             conn.execute("INSERT INTO events(service,environment,payload,received) VALUES(?,?,?,?)",(event.service,event.environment,event.model_dump_json(),end))
-        return {"partialSuccess":{"rejectedSpans":str(rejected),"errorMessage":"Invalid or expired tagged spans"}} if rejected else {}
+        return {"partialSuccess":{"rejectedSpans":str(rejected),"errorMessage":"Invalid, expired or unauthorized tagged spans"}} if rejected else {}
     @router.post("/v1/traces")
     async def traces(request:Request):
         if request.headers.get("content-type","").split(";")[0].strip()!="application/json" or request.headers.get("content-encoding","identity")!="identity":
