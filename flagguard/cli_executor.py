@@ -5,6 +5,7 @@ from contextlib import closing
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, StrictBool
+from .audit import record
 from . import cli_provider, providers
 
 class Plan(BaseModel):
@@ -72,6 +73,7 @@ def build_cli_router(authorize, db):
             result=conn.execute("UPDATE cli_changes SET status=? WHERE id=? AND status='pending' AND created>=unixepoch()-600",(status,id))
             if result.rowcount!=1:
                 raise HTTPException(409,"Missing, expired or already decided")
+            record(conn, "cli_change", id, "decision", status)
         return {"id":id,"status":status}
     @router.get("/{id}")
     def get(id: str):
@@ -91,6 +93,7 @@ def build_cli_router(authorize, db):
             result=conn.execute("UPDATE cli_changes SET status='executing' WHERE id=? AND status='approved' AND created>=unixepoch()-600",(id,))
             if result.rowcount!=1:
                 raise HTTPException(409,"Not approved, expired or already used")
+            record(conn, "cli_change", id, "execute", "executing")
         status,detail="unknown","Execution interrupted; inspect provider"
         try:
             if snapshot(feature, segment_id)!=json.loads(before):
@@ -114,5 +117,6 @@ def build_cli_router(authorize, db):
         finally:
             with closing(connection()) as conn, conn:
                 conn.execute("UPDATE cli_changes SET status=?,detail=? WHERE id=?",(status,detail,id))
+                record(conn, "cli_change", id, "result", status)
         return {"id":id,"status":status,"executed":status=="verified","detail":detail}
     return router
