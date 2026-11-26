@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from . import providers
 
-def run_cli(feature, action="get", segment=None):
+def run_cli(feature, action="get", segment=None, inspect_only=False):
     if segment is not None and (not isinstance(segment,int) or segment <= 0):
         raise providers.ProviderError("Invalid segment ID")
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}", feature):
@@ -39,7 +39,7 @@ def run_cli(feature, action="get", segment=None):
             return data
         if not isinstance(data,dict) or data.get("feature")!=feature or type(data.get("enabled")) is not bool:
             raise providers.ProviderError("Unexpected CLI response")
-        if data.get("type")!="standard" or data.get("segment_overrides")!=0 or data.get("identity_overrides")!=0:
+        if not inspect_only and (data.get("type")!="standard" or data.get("segment_overrides")!=0 or data.get("identity_overrides")!=0):
             raise providers.ProviderError("Only standard flags without overrides supported")
         return data
 
@@ -54,3 +54,6 @@ def segment_snapshot(feature, segment):
 
 def segment_update(feature, segment, enabled):
     return run_cli(feature, "enable" if enabled else "disable", segment)
+
+def inspect_flag(feature):
+    return run_cli(feature, inspect_only=True)
