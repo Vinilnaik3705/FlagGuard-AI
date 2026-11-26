@@ -12,6 +12,16 @@ def authorize(authorization: str = Header(default="")):
     if not key or not secrets.compare_digest(authorization, "Bearer "+key):
         raise HTTPException(401, "Invalid or unconfigured credentials")
 
+def authorize_reader(authorization: str = Header(default="")):
+    admin = os.getenv("FLAGGUARD_API_KEY")
+    if admin and secrets.compare_digest(authorization, "Bearer "+admin):
+        return
+    viewer = os.getenv("FLAGGUARD_VIEWER_KEY")
+    telemetry = os.getenv("FLAGGUARD_TELEMETRY_KEY")
+    if viewer and viewer != telemetry and viewer != admin and secrets.compare_digest(authorization, "Bearer "+viewer):
+        return
+    raise HTTPException(401, "Invalid reader credentials")
+
 def authorize_telemetry(authorization: str = Header(default="")):
     key = os.getenv("FLAGGUARD_TELEMETRY_KEY")
     admin = os.getenv("FLAGGUARD_API_KEY")
@@ -57,7 +67,7 @@ def ingest(event: Event):
         conn.execute("INSERT INTO events(service,environment,payload) VALUES(?,?,?)",(event.service,event.environment,event.model_dump_json()))
     return {"accepted":True}
 
-@app.get("/api/v1/analysis", dependencies=[Depends(authorize)])
+@app.get("/api/v1/analysis", dependencies=[Depends(authorize_reader)])
 def analysis(service: str, environment: str, flag: str):
     with closing(db()) as conn:
         rows=conn.execute("SELECT payload FROM events WHERE service=? AND environment=? AND received >= unixepoch()-300 ORDER BY id DESC LIMIT 10000",(service,environment)).fetchall()
@@ -103,7 +113,7 @@ async def lifespan(app):
             await asyncio.gather(*tasks, return_exceptions=True)
 
 app.router.lifespan_context = lifespan
-app.include_router(build_monitor_router(authorize, db))
+app.include_router(build_monitor_router(authorize_reader, db))
 app.include_router(build_audit_router(authorize, db))
 
 from .commands import build_command_router
