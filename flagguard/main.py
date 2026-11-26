@@ -86,6 +86,7 @@ from .cli_executor import build_cli_router
 app.include_router(build_cli_router(authorize, db))
 from .monitor import scan, build_monitor_router
 from .audit import prune, build_audit_router
+from .recovery_health import verify_recoveries
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -96,6 +97,7 @@ async def lifespan(app):
     async def loop():
         while True:
             try:
+                await asyncio.to_thread(verify_recoveries, db)
                 await asyncio.to_thread(scan, db, analysis)
             except Exception:
                 logging.getLogger(__name__).exception("Monitoring scan failed")
