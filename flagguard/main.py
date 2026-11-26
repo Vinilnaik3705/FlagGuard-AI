@@ -45,3 +45,27 @@ from .executor import build_executor_router
 app.include_router(build_executor_router(authorize, db))
 from .cli_executor import build_cli_router
 app.include_router(build_cli_router(authorize, db))
+from .monitor import scan, build_monitor_router
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+    async def loop():
+        while True:
+            try:
+                await asyncio.to_thread(scan, db, analysis)
+            except Exception:
+                logging.getLogger(__name__).exception("Monitoring scan failed")
+            await asyncio.sleep(15)
+    task = asyncio.create_task(loop()) if os.getenv("FLAGGUARD_MONITOR_ENABLED") == "true" else None
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+app.router.lifespan_context = lifespan
+app.include_router(build_monitor_router(authorize, db))
