@@ -11,6 +11,19 @@ def authorize(authorization: str = Header(default="")):
     if not key or not secrets.compare_digest(authorization, "Bearer "+key):
         raise HTTPException(401, "Invalid or unconfigured credentials")
 
+def authorize_telemetry(authorization: str = Header(default="")):
+    key = os.getenv("FLAGGUARD_TELEMETRY_KEY")
+    admin = os.getenv("FLAGGUARD_API_KEY")
+    if key:
+        if admin and secrets.compare_digest(key, admin):
+            raise HTTPException(503, "Telemetry and administrator keys must differ")
+        if not secrets.compare_digest(authorization, "Bearer "+key):
+            raise HTTPException(401, "Invalid telemetry credentials")
+    elif os.getenv("FLAGGUARD_REQUIRE_SEPARATE_KEYS") == "true":
+        raise HTTPException(503, "Telemetry credentials not configured")
+    else:
+        authorize(authorization)
+
 def db():
     conn = sqlite3.connect(os.environ.get("FLAGGUARD_DB","flagguard.db"))
     conn.execute("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, service TEXT, environment TEXT, payload TEXT, received REAL DEFAULT (unixepoch()))")
@@ -27,7 +40,7 @@ class Event(BaseModel):
 def health():
     return {"status":"ok"}
 
-@app.post("/api/v1/telemetry", dependencies=[Depends(authorize)])
+@app.post("/api/v1/telemetry", dependencies=[Depends(authorize_telemetry)])
 def ingest(event: Event):
     with closing(db()) as conn, conn:
         conn.execute("INSERT INTO events(service,environment,payload) VALUES(?,?,?)",(event.service,event.environment,event.model_dump_json()))
@@ -74,7 +87,7 @@ from .commands import build_command_router
 app.include_router(build_command_router(authorize, db, analysis))
 
 from .otlp import build_otlp_router
-app.include_router(build_otlp_router(authorize, db, Event))
+app.include_router(build_otlp_router(authorize_telemetry, db, Event))
 
 from pathlib import Path
 from fastapi.responses import FileResponse
