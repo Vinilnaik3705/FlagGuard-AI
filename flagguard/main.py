@@ -69,3 +69,6 @@ async def lifespan(app):
 
 app.router.lifespan_context = lifespan
 app.include_router(build_monitor_router(authorize, db))
+
+from .commands import build_command_router
+app.include_router(build_command_router(authorize, db, analysis))
