@@ -3,6 +3,7 @@ from contextlib import closing
 from fastapi import FastAPI, Header, HTTPException, Depends
 from pydantic import BaseModel, Field, StrictBool, StrictInt, ConfigDict, field_validator
 from .core import summarize, assess, policy
+from .workspace import build_workspace_router, scoped_policy, read_workspace, authorized
 from .telemetry_scope import allowed
 from .segment_evidence import segment_evidence
 from pydantic import model_validator
@@ -80,7 +81,7 @@ def ingest(event: Event):
 @app.get("/api/v1/analysis", dependencies=[Depends(authorize_reader)])
 def analysis(service: str, environment: str, flag: str):
     try:
-        rules=policy()
+        rules=scoped_policy(db,service,environment,flag)
     except ValueError:
         raise HTTPException(503,"Invalid detection policy") from None
     window=rules.pop("window_seconds")
@@ -108,8 +109,10 @@ async def lifespan(app):
     async def loop():
         while True:
             try:
-                await asyncio.to_thread(verify_recoveries, db)
-                await asyncio.to_thread(scan, db, analysis)
+                config=await asyncio.to_thread(read_workspace, db)
+                if (config and config['active'] and authorized(config)) or (config is None and os.getenv('FLAGGUARD_MONITOR_ENABLED')=='true'):
+                    await asyncio.to_thread(verify_recoveries, db)
+                    await asyncio.to_thread(scan, db, analysis)
             except Exception:
                 logging.getLogger(__name__).exception("Monitoring scan failed")
             await asyncio.sleep(15)
@@ -121,7 +124,7 @@ async def lifespan(app):
                 logging.getLogger(__name__).exception("Telemetry retention failed")
             await asyncio.sleep(3600)
     retention = asyncio.create_task(retention_loop()) if os.getenv("FLAGGUARD_RETENTION_ENABLED") == "true" else None
-    task = asyncio.create_task(loop()) if os.getenv("FLAGGUARD_MONITOR_ENABLED") == "true" else None
+    task = asyncio.create_task(loop())
     try:
         yield
     finally:
@@ -133,6 +136,7 @@ async def lifespan(app):
 
 app.router.lifespan_context = lifespan
 app.include_router(build_monitor_router(authorize_reader, db))
+app.include_router(build_workspace_router(authorize, db))
 app.include_router(build_audit_router(authorize, db))
 
 from .commands import build_command_router
