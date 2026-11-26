@@ -24,17 +24,19 @@ class Client:
             raise ValueError("Missing key or invalid service/environment")
         if not 0 < timeout <= 10:
             raise ValueError("Invalid timeout")
-    def record(self, flags, status_code, latency_ms):
+    def record(self, flags, status_code, latency_ms, segments=None):
         if not isinstance(flags,dict) or not all(isinstance(k,str) and type(v) is bool for k,v in flags.items()):
             raise ValueError("Pass actual evaluated boolean flags")
         if type(status_code) is not int or not 100 <= status_code <= 599 or isinstance(latency_ms,bool) or not isinstance(latency_ms,(int,float)) or not math.isfinite(latency_ms) or latency_ms < 0:
             raise ValueError("Invalid request outcome")
-        payload = json.dumps(dict(service=self.service,environment=self.environment,flags=flags,status_code=status_code,latency_ms=latency_ms)).encode()
+        if segments is not None and (not isinstance(segments,dict) or len(segments)>100 or any(k not in flags or type(v) is not int or not 0<v<=9007199254740991 for k,v in segments.items())):
+            raise ValueError("Invalid evaluated segment metadata")
+        payload = json.dumps(dict(service=self.service,environment=self.environment,flags=flags,status_code=status_code,latency_ms=latency_ms,segments=segments or {})).encode()
         req = Request(self.url+"/api/v1/telemetry", data=payload, headers={"Authorization":"Bearer "+self.key,"Content-Type":"application/json"},method="POST")
         try:
             with build_opener(NoRedirect()).open(req,timeout=self.timeout) as response:
                 return 200 <= response.status < 300
         except (URLError,OSError):
             return False
-    async def arecord(self, flags, status_code, latency_ms):
-        return await asyncio.to_thread(self.record, flags, status_code, latency_ms)
+    async def arecord(self, flags, status_code, latency_ms, segments=None):
+        return await asyncio.to_thread(self.record, flags, status_code, latency_ms, segments)
