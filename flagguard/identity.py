@@ -31,3 +31,12 @@ router=APIRouter(prefix="/api/v2/auth")
 @router.get("/me")
 def me(user=Depends(identity)):
     return user
+
+@router.get("/config")
+def config():
+    url=os.getenv("SUPABASE_URL","").rstrip("/")
+    key=os.getenv("SUPABASE_PUBLISHABLE_KEY","")
+    parsed=urlsplit(url)
+    if parsed.scheme!="https" or not parsed.hostname or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment or not key.startswith("sb_publishable_"):
+        raise HTTPException(503,"Configure a Supabase publishable key and HTTPS project URL")
+    return {"url":url,"publishable_key":key}
