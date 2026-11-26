@@ -1,4 +1,6 @@
 import json
+import os
+from .cli_executor import prepare_change, Plan
 from contextlib import closing
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,12 +41,23 @@ def build_router(authorize, db, analysis):
         except providers.ProviderError:
             explanation = "AI unavailable. Review the deterministic recommendation and sampled evidence."
             source = "rule_based"
+        recovery_plan = None
+        recovery_error = None
         approval_id = None
         if evidence["recommendation"] == "propose_rollback":
+            if os.getenv("FLAGSMITH_EXECUTION_PROVIDER") == "cli":
+                # Explicit binding between telemetry labels and the configured Flagsmith environment.
+                if query.environment != os.getenv("FLAGGUARD_TELEMETRY_ENVIRONMENT", "development") or query.service not in os.getenv("FLAGGUARD_ALLOWED_SERVICES", "").split(","):
+                    recovery_error = "Telemetry scope not authorized for recovery"
+                else:
+                    try:
+                        recovery_plan = prepare_change(db, Plan(feature=query.flag, enabled=False))
+                    except (HTTPException, ValueError) as exc:
+                        recovery_error = str(exc.detail) if isinstance(exc, HTTPException) else "Invalid feature name"
             approval_id = str(uuid4())
             with closing(connection()) as conn, conn:
                 conn.execute("INSERT INTO approvals(id,evidence,status) VALUES(?,?,?)", (approval_id, json.dumps(evidence), "pending"))
-        return {**evidence, "explanation": explanation, "explanation_source": source, "approval_id": approval_id}
+        return {**evidence, "explanation": explanation, "explanation_source": source, "approval_id": approval_id, "recovery_plan": recovery_plan, "recovery_error": recovery_error}
 
     @router.get("/approvals")
     def approvals():
