@@ -4,6 +4,7 @@ import json
 import logging
 from contextlib import closing
 from .agent import Investigation, investigate_once
+from .workspace import read_workspace, authorized
 
 log = logging.getLogger(__name__)
 
@@ -11,6 +12,13 @@ def scan(db, analysis):
     services = [s.strip() for s in os.getenv("FLAGGUARD_ALLOWED_SERVICES","").split(",") if s.strip()]
     flags = [s.strip() for s in os.getenv("FLAGGUARD_ALLOWED_FEATURE_NAMES","").split(",") if s.strip()]
     environment = os.getenv("FLAGGUARD_TELEMETRY_ENVIRONMENT","development")
+    config=read_workspace(db)
+    if config:
+        if not config["active"] or not authorized(config):
+            return
+        services=[config["service"]]
+        flags=config["flags"]
+        environment=config["environment"]
     for service in services:
         for flag in flags:
             evidence = analysis(service, environment, flag)
