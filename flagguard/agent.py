@@ -1,6 +1,7 @@
 import json
 import os
 from .cli_executor import prepare_change, Plan
+from .segment_evidence import target
 from contextlib import closing
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
@@ -40,10 +41,10 @@ def investigate_once(db, analysis, query):
                 recovery_error = "Telemetry scope not authorized for recovery"
             else:
                 try:
-                    segment = os.getenv("FLAGGUARD_CANARY_SEGMENT_ID")
-                    recovery_plan = prepare_change(db, Plan(feature=query.flag, enabled=False, segment_id=int(segment) if segment else None))
+                    segment = target(evidence)
+                    recovery_plan = prepare_change(db, Plan(feature=query.flag, enabled=False, segment_id=segment))
                 except (HTTPException, ValueError) as exc:
-                    recovery_error = str(exc.detail) if isinstance(exc, HTTPException) else "Invalid feature name"
+                    recovery_error = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
         approval_id = str(uuid4())
         with closing(approval_connection(db)) as conn, conn:
             conn.execute("INSERT INTO approvals(id,evidence,status) VALUES(?,?,?)", (approval_id, json.dumps(evidence), "pending"))
