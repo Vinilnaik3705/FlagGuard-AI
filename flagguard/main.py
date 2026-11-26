@@ -160,3 +160,7 @@ from .identity import router as identity_router
 from .tenant_directory import router as tenant_router
 app.include_router(identity_router)
 app.include_router(tenant_router)
+
+@app.get("/accounts", include_in_schema=False)
+def accounts():
+    return FileResponse(Path(__file__).with_name("accounts.html"),media_type="text/html",headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer"})
