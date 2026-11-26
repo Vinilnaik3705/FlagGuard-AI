@@ -164,3 +164,6 @@ app.include_router(tenant_router)
 @app.get("/accounts", include_in_schema=False)
 def accounts():
     return FileResponse(Path(__file__).with_name("accounts.html"),media_type="text/html",headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer"})
+
+from .tenant_telemetry import build_router as build_tenant_telemetry_router
+app.include_router(build_tenant_telemetry_router(Event))
