@@ -6,10 +6,11 @@ class FlagGuardClient {
     if (!apiKey || ![service, environment].every(x => typeof x === 'string' && x.length > 0 && x.length <= 100) || !Number.isInteger(timeout) || timeout < 1 || timeout > 10000) throw new Error('Invalid client configuration');
     Object.assign(this,{service,environment,url:url.replace(/\/+$/,''),apiKey,timeout});
   }
-  async record(flags,statusCode,latencyMs) {
+  async record(flags,statusCode,latencyMs,segments={}) {
     if (!flags || typeof flags !== 'object' || Array.isArray(flags) || !Object.values(flags).every(v=>typeof v==='boolean') || !Number.isInteger(statusCode) || statusCode<100 || statusCode>599 || !Number.isFinite(latencyMs) || latencyMs<0) throw new Error('Invalid telemetry');
+    if (!segments || typeof segments !== 'object' || Array.isArray(segments) || Object.keys(segments).length>100 || Object.entries(segments).some(([k,v])=>!Object.hasOwn(flags,k)||!Number.isSafeInteger(v)||v<=0)) throw new Error('Invalid evaluated segment metadata');
     try {
-      const response = await fetch(this.url+'/api/v1/telemetry',{method:'POST',redirect:'error',headers:{Authorization:'Bearer '+this.apiKey,'Content-Type':'application/json'},body:JSON.stringify({service:this.service,environment:this.environment,flags,status_code:statusCode,latency_ms:latencyMs}),signal:AbortSignal.timeout(this.timeout)});
+      const response = await fetch(this.url+'/api/v1/telemetry',{method:'POST',redirect:'error',headers:{Authorization:'Bearer '+this.apiKey,'Content-Type':'application/json'},body:JSON.stringify({service:this.service,environment:this.environment,flags,status_code:statusCode,latency_ms:latencyMs,segments}),signal:AbortSignal.timeout(this.timeout)});
       return response.ok;
     } catch { return false; }
   }
