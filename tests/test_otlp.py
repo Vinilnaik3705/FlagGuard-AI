@@ -25,4 +25,31 @@ def test_otlp_invalid(monkeypatch):
     monkeypatch.setenv("FLAGGUARD_API_KEY","test")
     client=TestClient(app,headers={"Authorization":"Bearer test"})
     assert client.post("/v1/traces",json={}).status_code==400
-    assert client.post("/v1/traces",content=b"abc",headers={"Content-Type":"application/x-protobuf"}).status_code==415
+    assert client.post("/v1/traces",content=b"abc",headers={"Content-Type":"application/x-protobuf"}).status_code==400
+
+
+def test_protobuf(tmp_path,monkeypatch):
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest, ExportTraceServiceResponse
+    monkeypatch.setenv("FLAGGUARD_DB",str(tmp_path/"proto.db"))
+    monkeypatch.setenv("FLAGGUARD_API_KEY","test")
+    client=TestClient(app,headers={"Authorization":"Bearer test"})
+    req=ExportTraceServiceRequest()
+    resource=req.resource_spans.add()
+    resource.resource.attributes.add(key="service.name").value.string_value="payment"
+    resource.resource.attributes.add(key="deployment.environment.name").value.string_value="development"
+    span=resource.scope_spans.add().spans.add()
+    span.trace_id=b"a"*16
+    span.span_id=b"b"*8
+    span.end_time_unix_nano=time.time_ns()
+    span.start_time_unix_nano=span.end_time_unix_nano-10000000
+    span.attributes.add(key="flagguard.request").value.bool_value=True
+    span.attributes.add(key="flagguard.flag.checkout").value.bool_value=True
+    span.attributes.add(key="http.response.status_code").value.int_value=500
+    for _ in range(2):
+        response=client.post("/v1/traces",content=req.SerializeToString(),headers={"Content-Type":"application/x-protobuf"})
+        assert response.status_code==200
+        assert response.headers["content-type"]=="application/x-protobuf"
+        assert ExportTraceServiceResponse.FromString(response.content).partial_success.rejected_spans==0
+    result=client.get("/api/v1/analysis",params={"service":"payment","environment":"development","flag":"checkout"}).json()
+    assert result["groups"]["enabled"]["requests"]==1
+    assert result["groups"]["enabled"]["errors"]==1
