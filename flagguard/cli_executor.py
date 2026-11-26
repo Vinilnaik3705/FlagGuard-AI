@@ -10,16 +10,25 @@ from . import cli_provider, providers
 class Plan(BaseModel):
     feature: str = Field(pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$")
     enabled: StrictBool
+    segment_id: int | None = Field(default=None, gt=0)
 
 class Decision(BaseModel):
     approve: StrictBool
 
-def scope(feature):
+def scope(feature, segment_id=None):
     if os.getenv("FLAGSMITH_EXECUTION_PROVIDER") != "cli" or os.getenv("FLAGGUARD_ENABLE_WRITES") != "true":
         raise HTTPException(403,"CLI writes disabled")
     if feature not in [s.strip() for s in os.getenv("FLAGGUARD_ALLOWED_FEATURE_NAMES","").split(",")]:
         raise HTTPException(403,"Feature not allowlisted")
-    return {"environment":providers.required("FLAGSMITH_ENVIRONMENT_ID"),"project":providers.required("FLAGSMITH_PROJECT_ID")}
+    result = {"environment":providers.required("FLAGSMITH_ENVIRONMENT_ID"),"project":providers.required("FLAGSMITH_PROJECT_ID")}
+    if segment_id is not None:
+        if str(segment_id) not in [s.strip() for s in os.getenv("FLAGGUARD_ALLOWED_SEGMENT_IDS","").split(",")]:
+            raise HTTPException(403,"Segment not allowlisted")
+        result["segment_id"] = segment_id
+    return result
+
+def snapshot(feature, segment_id):
+    return cli_provider.snapshot(feature) if segment_id is None else cli_provider.segment_snapshot(feature, segment_id)
 
 def change_connection(db):
     conn=db()
@@ -28,8 +37,8 @@ def change_connection(db):
 
 def prepare_change(db, body: Plan):
     try:
-        target_scope=scope(body.feature)
-        before=cli_provider.snapshot(body.feature)
+        target_scope=scope(body.feature, body.segment_id)
+        before=snapshot(body.feature, body.segment_id)
     except providers.ProviderError as exc:
         raise HTTPException(502,str(exc)) from None
     if before["enabled"]==body.enabled:
@@ -74,7 +83,8 @@ def build_cli_router(authorize, db):
         with closing(connection()) as conn, conn:
             feature,s,before,target,_,_=read(conn,id)
             try:
-                if scope(feature)!=json.loads(s):
+                segment_id=json.loads(s).get('segment_id')
+                if scope(feature, segment_id)!=json.loads(s):
                     raise HTTPException(409,"Target scope changed")
             except providers.ProviderError as exc:
                 raise HTTPException(502,str(exc)) from None
@@ -83,15 +93,18 @@ def build_cli_router(authorize, db):
                 raise HTTPException(409,"Not approved, expired or already used")
         status,detail="unknown","Execution interrupted; inspect provider"
         try:
-            if cli_provider.snapshot(feature)!=json.loads(before):
+            if snapshot(feature, segment_id)!=json.loads(before):
                 status,detail="stale","Snapshot changed; request fresh approval"
             else:
-                cli_provider.update(feature,bool(target))
-                actual=cli_provider.snapshot(feature)
+                if segment_id is None:
+                    cli_provider.update(feature,bool(target))
+                else:
+                    cli_provider.segment_update(feature,segment_id,bool(target))
+                actual=snapshot(feature, segment_id)
                 expected=json.loads(before)
                 expected["enabled"]=bool(target)
                 if actual==expected:
-                    status,detail="verified","Environment default verified"
+                    status,detail="verified",("Environment default verified" if segment_id is None else "Segment override verified")
                 elif actual["enabled"]==bool(target):
                     status,detail="unknown","Target enabled state observed but other snapshot fields changed"
                 else:
