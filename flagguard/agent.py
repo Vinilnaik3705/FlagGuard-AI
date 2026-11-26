@@ -2,6 +2,7 @@ import json
 import os
 from .cli_executor import prepare_change, Plan
 from .segment_evidence import target
+from .incident_report import build_report
 from contextlib import closing
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
@@ -48,7 +49,8 @@ def investigate_once(db, analysis, query):
         approval_id = str(uuid4())
         with closing(approval_connection(db)) as conn, conn:
             conn.execute("INSERT INTO approvals(id,evidence,status) VALUES(?,?,?)", (approval_id, json.dumps(evidence), "pending"))
-    return {**evidence, "explanation": explanation, "explanation_source": source, "approval_id": approval_id, "recovery_plan": recovery_plan, "recovery_error": recovery_error}
+    report=build_report(evidence, explanation, source, recovery_plan, recovery_error)
+    return {**evidence, "report":report, "explanation": explanation, "explanation_source": source, "approval_id": approval_id, "recovery_plan": recovery_plan, "recovery_error": recovery_error}
 
 
 
