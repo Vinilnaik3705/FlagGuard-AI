@@ -1,10 +1,27 @@
-"""OTLP/HTTP JSON receiver for explicitly tagged request spans."""
+"""OTLP/HTTP JSON and protobuf receiver for explicitly tagged request spans."""
 import json
 import time
 from .telemetry_scope import allowed
 from contextlib import closing
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import Response
+from google.protobuf.message import DecodeError
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest, ExportTraceServiceResponse
+
+def proto_attrs(items):
+    result=[]
+    for item in items:
+        kind=item.value.WhichOneof("value")
+        names={"string_value":"stringValue","bool_value":"boolValue","int_value":"intValue"}
+        if kind in names:
+            result.append({"key":item.key,"value":{names[kind]:getattr(item.value,kind)}})
+    return result
+
+def proto_data(body):
+    req=ExportTraceServiceRequest()
+    req.ParseFromString(body)
+    return {"resourceSpans":[{"resource":{"attributes":proto_attrs(r.resource.attributes)},"scopeSpans":[{"spans":[{"traceId":s.trace_id.hex(),"spanId":s.span_id.hex(),"startTimeUnixNano":s.start_time_unix_nano,"endTimeUnixNano":s.end_time_unix_nano,"attributes":proto_attrs(s.attributes),"status":{"code":s.status.code}} for s in scope.spans]} for scope in r.scope_spans]} for r in req.resource_spans]}
 
 def attrs(items):
     out={}
@@ -54,16 +71,25 @@ def build_otlp_router(authorize,db,Event):
         return {"partialSuccess":{"rejectedSpans":str(rejected),"errorMessage":"Invalid, expired or unauthorized tagged spans"}} if rejected else {}
     @router.post("/v1/traces")
     async def traces(request:Request):
-        if request.headers.get("content-type","").split(";")[0].strip()!="application/json" or request.headers.get("content-encoding","identity")!="identity":
-            raise HTTPException(415,"Only uncompressed OTLP JSON supported")
+        content_type=request.headers.get("content-type","").split(";")[0].strip()
+        if content_type not in ("application/json","application/x-protobuf") or request.headers.get("content-encoding","identity")!="identity":
+            raise HTTPException(415,"Only uncompressed OTLP HTTP JSON or protobuf supported")
         body=bytearray()
         async for chunk in request.stream():
             body.extend(chunk)
             if len(body)>2_000_000: raise HTTPException(413,"Payload too large")
         try:
-            data=json.loads(body)
+            data=proto_data(bytes(body)) if content_type=="application/x-protobuf" else json.loads(body)
             if not isinstance(data,dict) or not isinstance(data.get("resourceSpans"),list): raise ValueError()
-            return await run_in_threadpool(ingest,data)
-        except (ValueError,TypeError,KeyError,AttributeError):
-            raise HTTPException(400,"Invalid OTLP JSON") from None
+            result=await run_in_threadpool(ingest,data)
+            if content_type=="application/x-protobuf":
+                response=ExportTraceServiceResponse()
+                partial=result.get("partialSuccess")
+                if partial:
+                    response.partial_success.rejected_spans=int(partial["rejectedSpans"])
+                    response.partial_success.error_message=partial["errorMessage"]
+                return Response(content=response.SerializeToString(),media_type=content_type)
+            return result
+        except (DecodeError,ValueError,TypeError,KeyError,AttributeError,RecursionError):
+            raise HTTPException(400,"Invalid OTLP payload") from None
     return router
