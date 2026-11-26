@@ -3,6 +3,7 @@ from contextlib import closing
 from fastapi import FastAPI, Header, HTTPException, Depends
 from pydantic import BaseModel, Field, StrictBool, StrictInt, ConfigDict, field_validator
 from .core import summarize, assess
+from .telemetry_scope import allowed
 
 app = FastAPI(title="FlagGuard AI", version="0.1.0")
 
@@ -50,6 +51,8 @@ def health():
 
 @app.post("/api/v1/telemetry", dependencies=[Depends(authorize_telemetry)])
 def ingest(event: Event):
+    if not allowed(event):
+        raise HTTPException(403, 'Telemetry scope not authorized')
     with closing(db()) as conn, conn:
         conn.execute("INSERT INTO events(service,environment,payload) VALUES(?,?,?)",(event.service,event.environment,event.model_dump_json()))
     return {"accepted":True}
