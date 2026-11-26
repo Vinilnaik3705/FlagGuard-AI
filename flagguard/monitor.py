@@ -14,7 +14,7 @@ def scan(db, analysis):
     for service in services:
         for flag in flags:
             evidence = analysis(service, environment, flag)
-            if evidence["recommendation"] not in ("propose_rollback","investigate_shared_failure"):
+            if evidence["recommendation"] not in ("propose_rollback","investigate_shared_failure","investigate_latency_regression"):
                 continue
             key = json.dumps([service,environment,flag,evidence["recommendation"]])
             with closing(db()) as conn, conn:
