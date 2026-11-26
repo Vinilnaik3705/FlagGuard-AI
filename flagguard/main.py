@@ -75,3 +75,10 @@ app.include_router(build_command_router(authorize, db, analysis))
 
 from .otlp import build_otlp_router
 app.include_router(build_otlp_router(authorize, db, Event))
+
+from pathlib import Path
+from fastapi.responses import FileResponse
+
+@app.get("/", include_in_schema=False)
+def dashboard():
+    return FileResponse(Path(__file__).with_name("dashboard.html"), media_type="text/html", headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY"})
