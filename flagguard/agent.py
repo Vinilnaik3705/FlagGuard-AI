@@ -40,7 +40,8 @@ def investigate_once(db, analysis, query):
                 recovery_error = "Telemetry scope not authorized for recovery"
             else:
                 try:
-                    recovery_plan = prepare_change(db, Plan(feature=query.flag, enabled=False))
+                    segment = os.getenv("FLAGGUARD_CANARY_SEGMENT_ID")
+                    recovery_plan = prepare_change(db, Plan(feature=query.flag, enabled=False, segment_id=int(segment) if segment else None))
                 except (HTTPException, ValueError) as exc:
                     recovery_error = str(exc.detail) if isinstance(exc, HTTPException) else "Invalid feature name"
         approval_id = str(uuid4())
