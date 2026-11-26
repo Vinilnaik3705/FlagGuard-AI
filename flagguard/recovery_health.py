@@ -24,6 +24,9 @@ def verify_recoveries(db):
             completed=conn.execute("SELECT max(created) FROM audit_log WHERE entity='cli_change' AND entity_id=? AND action='result' AND status='verified'",(plan["id"],)).fetchone()[0]
             if completed is None:
                 continue
+            # Freeze the investigation policy for this recovery, even if workspace settings change.
+            rules={**policy(),**(result.get("policy") or {})}
+            rules["window_seconds"]=result.get("window_seconds",rules["window_seconds"])
             # Observe only post-execution telemetry, excluding the ambiguous completion second.
             deadline=completed+rules["window_seconds"]
             events=conn.execute("SELECT payload FROM events WHERE service=? AND environment=? AND received>? AND received<=? ORDER BY received,id LIMIT 10001",(result["service"],result["environment"],completed,min(now,deadline))).fetchall()
