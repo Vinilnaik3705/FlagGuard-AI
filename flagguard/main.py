@@ -67,6 +67,7 @@ app.include_router(build_executor_router(authorize, db))
 from .cli_executor import build_cli_router
 app.include_router(build_cli_router(authorize, db))
 from .monitor import scan, build_monitor_router
+from .audit import prune, build_audit_router
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -80,16 +81,27 @@ async def lifespan(app):
             except Exception:
                 logging.getLogger(__name__).exception("Monitoring scan failed")
             await asyncio.sleep(15)
+    async def retention_loop():
+        while True:
+            try:
+                await asyncio.to_thread(prune, db)
+            except Exception:
+                logging.getLogger(__name__).exception("Telemetry retention failed")
+            await asyncio.sleep(3600)
+    retention = asyncio.create_task(retention_loop()) if os.getenv("FLAGGUARD_RETENTION_ENABLED") == "true" else None
     task = asyncio.create_task(loop()) if os.getenv("FLAGGUARD_MONITOR_ENABLED") == "true" else None
     try:
         yield
     finally:
-        if task:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        tasks = [t for t in (task, retention) if t]
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 app.router.lifespan_context = lifespan
 app.include_router(build_monitor_router(authorize, db))
+app.include_router(build_audit_router(authorize, db))
 
 from .commands import build_command_router
 app.include_router(build_command_router(authorize, db, analysis))
