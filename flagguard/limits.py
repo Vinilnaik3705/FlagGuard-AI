@@ -13,7 +13,7 @@ class RequestLimits:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         path, method = scope["path"], scope["method"]
-        telemetry = path in ("/api/v1/telemetry", "/v1/traces")
+        telemetry = path in ("/api/v1/telemetry", "/api/v2/telemetry", "/v1/traces")
         command = path == "/api/v1/command"
         if os.getenv("FLAGGUARD_RATE_LIMIT_ENABLED") == "true" and (telemetry or command):
             key = "telemetry" if telemetry else "admin"
