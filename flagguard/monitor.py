@@ -21,9 +21,10 @@ def scan(db, analysis):
                 conn.execute("CREATE TABLE IF NOT EXISTS monitor_incidents (id INTEGER PRIMARY KEY, scope TEXT, created INTEGER DEFAULT (unixepoch()), result TEXT)")
                 conn.execute("BEGIN IMMEDIATE")
                 now=conn.execute("SELECT unixepoch()").fetchone()[0]
-                rows=conn.execute("SELECT id,created,result FROM monitor_incidents WHERE scope=? ORDER BY id DESC",(key,)).fetchall() if anomalous else conn.execute("SELECT id,created,result FROM monitor_incidents WHERE substr(scope,1,?)=? ORDER BY id DESC",(len(json.dumps([service,environment,flag])[:-1]+", "),json.dumps([service,environment,flag])[:-1]+", ")).fetchall()
+                prefix=json.dumps([service,environment,flag])[:-1]+", "
+                rows=conn.execute("SELECT id,created,result,scope FROM monitor_incidents WHERE substr(scope,1,?)=? ORDER BY id DESC",(len(prefix),prefix)).fetchall()
                 blocked=False
-                for rid,created,raw in rows:
+                for rid,created,raw,old_scope in rows:
                     old=json.loads(raw)
                     lifecycle=old.get("lifecycle",{})
                     if lifecycle.get("status")=="resolved":
@@ -32,7 +33,7 @@ def scan(db, analysis):
                         lifecycle.update(status="resolved",resolved_at=now,resolution="post_rollback_health")
                     elif old.get("status") in ("failed","investigating"):
                         if now-created<600:
-                            blocked=True
+                            blocked=blocked or old_scope==key
                         else:
                             lifecycle.update(status="investigation_failed",closed_at=now)
                     elif lifecycle.get("status")=="investigation_failed":
@@ -40,11 +41,16 @@ def scan(db, analysis):
                     else:
                         lifecycle.update(status="open",last_checked_at=now)
                         if recommendation=="monitor":
-                            since=lifecycle.setdefault("healthy_since",now)
+                            previous=lifecycle.get("healthy_last_seen")
+                            if previous is None or now-previous>45:
+                                lifecycle["healthy_since"]=now
+                            lifecycle["healthy_last_seen"]=now
+                            since=lifecycle["healthy_since"]
                             if now-since>=evidence.get("window_seconds",300):
                                 lifecycle.update(status="resolved",resolved_at=now,resolution="sustained_normal_comparison")
                         else:
                             lifecycle.pop("healthy_since",None)
+                            lifecycle.pop("healthy_last_seen",None)
                         if lifecycle["status"]=="open":
                             blocked=True
                     old["lifecycle"]=lifecycle
