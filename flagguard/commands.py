@@ -42,8 +42,16 @@ def run_command(db,analysis,message):
         if name not in ("flag_status","metrics","investigate") or set(args)!=expected or any(not isinstance(v,str) for v in args.values()) or args.get("flag") not in flags or ("service" in args and args["service"] not in services):
             return {"error":"Tool or scope not allowed"}
         if name=="flag_status":
-            s=cli_provider.snapshot(args["flag"])
-            return {"feature":s["feature"],"enabled":s["enabled"],"type":s.get("type")}
+            s=cli_provider.inspect_flag(args["flag"])
+            result={"feature":s["feature"],"environment_default_enabled":s["enabled"],"type":s.get("type"),"segment_overrides":s.get("segment_overrides"),"identity_overrides":s.get("identity_overrides")}
+            segment=os.getenv("FLAGGUARD_CANARY_SEGMENT_ID","")
+            if s.get("segment_overrides") and segment.isdigit() and segment in {x.strip() for x in os.getenv("FLAGGUARD_ALLOWED_SEGMENT_IDS","").split(",")}:
+                try:
+                    override=cli_provider.segment_snapshot(args["flag"],int(segment))
+                    result["canary"]={"segment_id":int(segment),"enabled":override["enabled"]}
+                except providers.ProviderError:
+                    result["canary_error"]="Configured segment state unavailable"
+            return result
         if name=="metrics":
             return analysis(args["service"],environment,args["flag"])
         result=investigate_once(db,analysis,Investigation(service=args["service"],environment=environment,flag=args["flag"]))
