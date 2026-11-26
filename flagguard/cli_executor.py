@@ -52,6 +52,7 @@ def prepare_change(db, body: Plan):
         else:
             id,status=str(uuid4()),"pending"
             conn.execute("INSERT INTO cli_changes(id,feature,scope,before,target,status) VALUES(?,?,?,?,?,?)",(id,body.feature,json.dumps(target_scope),json.dumps(before),int(body.enabled),status))
+            record(conn, "cli_change", id, "plan", "pending")
     return {"id":id,"feature":body.feature,**target_scope,"before_enabled":before["enabled"],"target_enabled":body.enabled,"status":status}
 
 def build_cli_router(authorize, db):
